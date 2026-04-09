@@ -12,22 +12,20 @@ meal-recommender/
 ├── models/
 │   └── schemas.py                   ← Schémas Pydantic (validation)
 ├── services/
-│   ├── calorie_service.py           ← COUCHE 1 : IA Classique (Ridge + HuggingFace)
+│   ├── calorie_dl                 ← COUCHE 1 : IA Classique (Deeplearning)
 │   ├── preference_service.py        ← COUCHE 2 : IA NLP (zero-shot BART)
 │   └── recommendation_service.py   ← COUCHE 3 : IA Générative (Claude API)
 ├── routes/
 │   ├── calorie_routes.py
 │   ├── preference_routes.py
 │   └── recommendation_routes.py
-└── tests/
-    └── test_all.py
 ```
 
 ## Les 3 couches d'IA
 
 | # | Type | Technologie | Rôle |
 |---|------|------------|------|
-| 1 | IA Classique | Ridge Regression + Dataset HuggingFace `khalidalt/DietNation` | Estimer BMR, TDEE, IMC |
+| 1 | IA Classique | DL + Dataset HuggingFace `khalidalt/DietNation` | Estimer BMR, TDEE, IMC |
 | 2 | IA NLP | `facebook/bart-large-mnli` (zero-shot) | Extraire régime, objectif, restrictions du texte |
 | 3 | IA Générative | Anthropic Claude `claude-sonnet-4-20250514` | Générer le plan de repas motivant |
 

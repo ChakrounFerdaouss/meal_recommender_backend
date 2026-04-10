@@ -1,0 +1,13 @@
+{
+  "mae_kcal": 34.5,
+  "rmse_kcal": 61.7,
+  "mape_pct": 1.52,
+  "r2": 0.9906,
+  "pearson_r": 0.9955,
+  "within_50kcal": 79.4,
+  "within_100kcal": 92.4,
+  "within_200kcal": 98.2,
+  "n_test": 3750,
+  "y_mean": 2496.4,
+  "y_std": 636.4
+}

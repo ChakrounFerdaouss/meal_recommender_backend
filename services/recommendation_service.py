@@ -1,17 +1,10 @@
 """
-COUCHE 3 — IA Générative : Recommandations de repas via OpenAI
-==============================================================
-Reproduit fidèlement la structure du code fourni :
-  - client OpenAI avec clé depuis .env
-  - generate_meal_plan(calories, preferences, objectif, mood, energy_level)
-  - Fallback texte si l'API est indisponible
-  - Wrapping FastAPI : génère en plus un JSON structuré pour l'API
-
-Workflow :
-  1. Construit le prompt depuis les données couches 1 + 2 + mood + energy_level
-  2. Appel gpt-4o-mini (temperature=0.7, max_tokens=1500)
-  3. Parse la réponse texte → structure JSON pour les routes FastAPI
-  4. Fallback automatique si quota/clé absente
+COUCHE 3 — IA Générative : Recommandations de repas
+=====================================================
+Compatible refonte :
+- CalorieDLService (tdee_kcal)
+- ExtractedPreferences (NLP couche 2)
+- MealRecommendation schema (FastAPI)
 """
 
 import os
@@ -26,31 +19,26 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 MODEL = "gpt-4o-mini"
 
-# ─── Client OpenAI — lazy init pour éviter l erreur au démarrage sans clé ───
+# ─────────────────────────────────────────────
+# OpenAI client lazy-safe
+# ─────────────────────────────────────────────
 
-_openai_client = None
+_client = None
 
-def _get_client() -> OpenAI:
-    global _openai_client
-    if _openai_client is None:
-        api_key = os.getenv("OPENAI_API_KEY", "")
-        _openai_client = OpenAI(api_key=api_key or "sk-placeholder")
-    return _openai_client
-
-# Proxy pour les mocks pytest (patch services.recommendation_service.client.chat...)
-class _ClientProxy:
-    class _Chat:
-        class _Completions:
-            @staticmethod
-            def create(**kw):
-                return _get_client().chat.completions.create(**kw)
-        completions = _Completions()
-    chat = _Chat()
-
-client = _ClientProxy()
+def _get_client():
+    global _client
+    if _client is None:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            logger.warning("OPENAI_API_KEY manquante → fallback activé")
+            api_key = "sk-placeholder"
+        _client = OpenAI(api_key=api_key)
+    return _client
 
 
-# ─── Fonction principale (votre structure exacte) ────────────────────────────
+# ─────────────────────────────────────────────
+# TEXT GENERATION (fallback humain)
+# ─────────────────────────────────────────────
 
 def generate_meal_plan(
     calories: float,
@@ -59,162 +47,126 @@ def generate_meal_plan(
     mood: str,
     energy_level: str
 ) -> str:
-    """
-    Génère un plan repas en texte clair et motivant.
-    Signature identique à votre code original.
-    Fallback automatique si l'API OpenAI est indisponible.
-    """
-    prompt = f"""
-    Crée un plan repas journalier adapté aux besoins suivants :
-    - Calories : {calories} kcal
-    - Préférences : {preferences}
-    - Objectif : {objectif}
-    - Humeur : {mood}
-    - Niveau d'énergie : {energy_level}
 
-    Inclure :
-    - Petit-déjeuner
-    - Déjeuner
-    - Dîner
-    - Collations si nécessaire
-    Ajouter des conseils motivants pour atteindre l'objectif.
-    Rédige le plan de façon claire et facile à suivre.
-    """
+    prompt = f"""
+Plan repas journalier :
+
+Calories: {calories}
+Préférences: {preferences}
+Objectif: {objectif}
+Humeur: {mood}
+Énergie: {energy_level}
+
+Inclure :
+- petit-déjeuner
+- déjeuner
+- dîner
+- collations si nécessaire
+- conseils motivationnels
+"""
 
     try:
-        response = client.chat.completions.create(
+        response = _get_client().chat.completions.create(
             model=MODEL,
             messages=[
-                {
-                    "role": "system",
-                    "content": "Tu es un coach nutritionnel bienveillant."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
+                {"role": "system", "content": "Tu es un coach nutritionnel bienveillant."},
+                {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=1500
+            max_tokens=1200
         )
         return response.choices[0].message.content
 
     except Exception as e:
-        logger.warning(f"OpenAI indisponible ({e}), utilisation du fallback")
-        return _fallback_plan(calories, preferences, objectif, mood, energy_level)
+        logger.warning(f"OpenAI fallback text utilisé: {e}")
+        return _fallback_text(calories, preferences, objectif, mood, energy_level)
 
 
-# ─── Fallback (votre fallback exact, enrichi) ────────────────────────────────
+# ─────────────────────────────────────────────
+# FALLBACK TEXT
+# ─────────────────────────────────────────────
 
-def _fallback_plan(
-    calories: float,
-    preferences: str,
-    objectif: str,
-    mood: str,
-    energy_level: str
-) -> str:
-    """Plan de repas par défaut si l'API OpenAI est indisponible."""
-
-    # Adapte les suggestions selon l'humeur et l'énergie
-    breakfast_boost = (
-        "smoothie protéiné banane-épinards + flocons d'avoine"
-        if energy_level in ("très faible", "faible")
-        else "yaourt grec + flocons d'avoine + fruits rouges"
-    )
-    comfort_note = (
-        " (repas réconfortant adapté à votre humeur 💙)"
-        if mood in ("stressé", "déprimé", "anxieux")
-        else ""
-    )
+def _fallback_text(calories, preferences, objectif, mood, energy_level):
 
     return f"""
-    Plan repas personnalisé{comfort_note} :
+Plan repas personnalisé :
 
-    🌅 Petit-déjeuner : {breakfast_boost}
-    🥗 Déjeuner : salade quinoa, légumes grillés, poulet ou tofu
-    🍎 Collation : amandes + fruit de saison
-    🍲 Dîner : soupe de légumes + poisson ou lentilles
+Petit-déjeuner : yaourt grec + flocons d’avoine + fruits
+Déjeuner : riz/quinoa + poulet ou tofu + légumes
+Dîner : soupe de légumes + poisson ou légumineuses
 
-    ✨ Conseils motivants :
-    - Visez environ {calories} kcal/jour — vous êtes sur la bonne voie !
-    - Objectif : {objectif} — chaque repas est un pas vers votre but.
-    - Humeur du jour : {mood} — l'alimentation influence positivement l'humeur.
-    - Énergie actuelle : {energy_level} — ce plan est adapté à votre niveau.
-    - Préférences : {preferences}
-    - Hydratez-vous bien : 1,5 à 2L d'eau par jour.
-    """
+Calories ciblées : {calories} kcal
+Objectif : {objectif}
+Préférences : {preferences}
+Humeur : {mood}
+Énergie : {energy_level}
+
+Conseil : reste constant et hydrate-toi bien.
+"""
 
 
-# ─── Version structurée JSON pour l'API FastAPI ──────────────────────────────
+# ─────────────────────────────────────────────
+# JSON PROMPT (STRUCTURED OUTPUT)
+# ─────────────────────────────────────────────
 
-def _build_json_prompt(
-    calories: float,
-    preferences: str,
-    objectif: str,
-    mood: str,
-    energy_level: str,
-    meals_per_day: int,
-    days: int
-) -> str:
-    """
-    Prompt étendu demandant une réponse JSON structurée.
-    Utilisé par generate_recommendations() pour l'API REST.
-    """
+def _build_json_prompt(calories, preferences, objectif, mood, energy_level, meals_per_day, days):
+
     meal_types = {
         2: ["déjeuner", "dîner"],
         3: ["petit-déjeuner", "déjeuner", "dîner"],
-        4: ["petit-déjeuner", "déjeuner", "collation", "dîner"],
-        5: ["petit-déjeuner", "collation matin", "déjeuner", "collation après-midi", "dîner"],
+        4: ["petit-déjeuner", "collation matin", "déjeuner", "dîner"],
+        5: ["petit-déjeuner", "collation matin", "déjeuner", "collation soir", "dîner"],
         6: ["petit-déjeuner", "collation matin", "déjeuner", "collation après-midi", "dîner", "collation soir"],
     }.get(meals_per_day, ["petit-déjeuner", "déjeuner", "dîner"])
 
     return f"""
-    Crée un plan repas pour {days} jour(s) adapté aux besoins suivants :
-    - Calories : {calories} kcal/jour
-    - Préférences alimentaires : {preferences}
-    - Objectif : {objectif}
-    - Humeur actuelle : {mood}
-    - Niveau d'énergie : {energy_level}
-    - Repas par jour : {meals_per_day} ({', '.join(meal_types)})
+Tu dois répondre UNIQUEMENT en JSON valide.
 
-    Règles importantes :
-    - Respecte les {calories} kcal (±5%)
-    - Adapte les repas à l'humeur "{mood}" (ex: si stressé → aliments anti-stress)
-    - Adapte les repas au niveau d'énergie "{energy_level}" (ex: si faible → repas énergisants)
-    - Inclure un message motivant et personnalisé pour chaque repas
-    - Ajouter des conseils motivants pour atteindre l'objectif
+Créer un plan sur {days} jour(s) :
 
-    Réponds UNIQUEMENT avec ce JSON valide, sans markdown ni texte hors JSON :
+Calories/jour: {calories}
+Préférences: {preferences}
+Objectif: {objectif}
+Humeur: {mood}
+Énergie: {energy_level}
 
+Repas: {", ".join(meal_types)}
+
+Règles:
+- Respect calories ±5%
+- Adapter humeur + énergie
+- Inclure motivation
+
+Format JSON strict:
+{{
+  "plan": [
     {{
-      "plan": [
+      "day": 1,
+      "total_calories": {int(calories)},
+      "meals": [
         {{
-          "day": 1,
-          "total_calories": {int(calories)},
-          "meals": [
-            {{
-              "name": "Nom du repas",
-              "meal_type": "petit-déjeuner",
-              "calories": 400,
-              "proteins_g": 20.0,
-              "carbs_g": 50.0,
-              "fats_g": 12.0,
-              "ingredients": ["ingrédient 1", "ingrédient 2"],
-              "instructions": "Instructions simples en 2-3 phrases.",
-              "motivation": "Message motivant personnalisé lié à l'humeur et à l'objectif."
-            }}
-          ]
+          "name": "repas",
+          "meal_type": "type",
+          "calories": 400,
+          "proteins_g": 25,
+          "carbs_g": 40,
+          "fats_g": 15,
+          "ingredients": ["..."],
+          "instructions": "...",
+          "motivation": "..."
         }}
-      ],
-      "weekly_tips": [
-        "Conseil motivant 1 lié à l'objectif",
-        "Conseil pratique 2",
-        "Conseil bien-être 3"
-      ],
-      "hydration_advice": "Conseil hydratation personnalisé selon l'énergie et l'humeur."
+      ]
     }}
-    """
+  ],
+  "weekly_tips": ["...", "..."],
+  "hydration_advice": "..."
+}}
+"""
 
+
+# ─────────────────────────────────────────────
+# MAIN FUNCTION (FASTAPI)
+# ─────────────────────────────────────────────
 
 def generate_recommendations(
     calorie_data: dict,
@@ -224,116 +176,112 @@ def generate_recommendations(
     meals_per_day: int = 3,
     days: int = 1
 ) -> dict:
-    """
-    Point d'entrée FastAPI — retourne un dict JSON structuré.
-    Utilise generate_meal_plan() en interne puis parse en JSON.
-    """
-    # Calcul des calories cibles selon l'objectif (cohérence avec couche 1)
-    tdee   = calorie_data["tdee"]
-    goal   = preferences.get("goal", "")
+
+    # ✔ compat refonte CalorieDLService
+    tdee = calorie_data.get("tdee_kcal") or calorie_data.get("tdee")
+
+    goal = preferences.get("goal", "")
+
     if "perdre" in goal:
-        target_kcal = round(tdee * 0.80)
-    elif "masse" in goal or "musculaire" in goal:
-        target_kcal = round(tdee * 1.10)
+        target_kcal = int(tdee * 0.80)
+    elif "masse" in goal:
+        target_kcal = int(tdee * 1.10)
     else:
-        target_kcal = round(tdee)
+        target_kcal = int(tdee)
 
-    # Construction des préférences en texte lisible
-    prefs_parts = []
+    # ✔ construction preferences texte
+    prefs = []
     if preferences.get("diet_type"):
-        prefs_parts.append(preferences["diet_type"])
+        prefs.append(preferences["diet_type"])
     if preferences.get("cuisine_style"):
-        prefs_parts.append("cuisine " + "/".join(preferences["cuisine_style"]))
+        prefs.append("cuisine " + "/".join(preferences["cuisine_style"]))
     if preferences.get("restrictions"):
-        prefs_parts.append("sans " + ", ".join(preferences["restrictions"]))
+        prefs.append("sans " + ", ".join(preferences["restrictions"]))
     if preferences.get("preferred_proteins"):
-        prefs_parts.append("protéines : " + ", ".join(preferences["preferred_proteins"]))
-    preferences_str = " | ".join(prefs_parts) if prefs_parts else "équilibré"
+        prefs.append("protéines: " + ", ".join(preferences["preferred_proteins"]))
 
-    logger.info(f"Appel OpenAI — {days}j, {meals_per_day} repas, humeur={mood}, énergie={energy_level}")
+    preferences_str = " | ".join(prefs) if prefs else "équilibré"
 
-    # Essai avec prompt JSON structuré
-    json_prompt = _build_json_prompt(
-        calories=target_kcal,
-        preferences=preferences_str,
-        objectif=goal or "maintenir la santé",
-        mood=mood,
-        energy_level=energy_level,
-        meals_per_day=meals_per_day,
-        days=days
-    )
+    logger.info("Génération plan repas IA")
 
     try:
-        response = client.chat.completions.create(
+        response = _get_client().chat.completions.create(
             model=MODEL,
             messages=[
-                {"role": "system", "content": "Tu es un coach nutritionnel bienveillant. Réponds uniquement en JSON valide."},
-                {"role": "user",   "content": json_prompt}
+                {"role": "system", "content": "Répond uniquement en JSON valide."},
+                {
+                    "role": "user",
+                    "content": _build_json_prompt(
+                        target_kcal,
+                        preferences_str,
+                        goal or "maintenir santé",
+                        mood,
+                        energy_level,
+                        meals_per_day,
+                        days
+                    )
+                }
             ],
             temperature=0.7,
             max_tokens=1500
         )
+
         raw = response.choices[0].message.content.strip()
 
-        # Nettoyage éventuel de blocs markdown
-        raw = re.sub(r"^```(?:json)?\n?", "", raw)
-        raw = re.sub(r"\n?```$", "", raw.strip())
+        # cleanup JSON
+        raw = re.sub(r"```json|```", "", raw).strip()
 
-        plan = json.loads(raw)
-        plan["model_used"] = f"OpenAI {MODEL}"
-        logger.info(f"Plan JSON généré avec succès — {len(plan.get('plan', []))} jour(s)")
-        return plan
+        data = json.loads(raw)
+        data["model_used"] = f"OpenAI {MODEL}"
+        return data
 
     except Exception as e:
-        # Fallback : génère le texte simple puis le structure manuellement
-        logger.warning(f"JSON OpenAI échoué ({e}), utilisation du fallback structuré")
-        fallback_text = _fallback_plan(
-            calories=target_kcal,
-            preferences=preferences_str,
-            objectif=goal or "maintenir la santé",
-            mood=mood,
-            energy_level=energy_level
+        logger.warning(f"Fallback structuré activé: {e}")
+
+        return _build_fallback_structured(
+            target_kcal,
+            meals_per_day,
+            days
         )
-        return _text_to_structured(fallback_text, target_kcal, meals_per_day, days)
 
 
-def _text_to_structured(text: str, calories: int, meals_per_day: int, days: int) -> dict:
-    """Convertit le plan texte fallback en structure JSON compatible avec l'API."""
+# ─────────────────────────────────────────────
+# FALLBACK STRUCTURED (FIXED)
+# ─────────────────────────────────────────────
+
+def _build_fallback_structured(calories, meals_per_day, days):
+
     per_meal = calories // meals_per_day
-    meal_names = {
-        "petit-déjeuner": ("Petit-déjeuner équilibré",     per_meal),
-        "déjeuner":       ("Déjeuner complet",             per_meal),
-        "collation":      ("Collation saine",              per_meal),
-        "dîner":          ("Dîner léger et nutritif",      per_meal),
-    }
-    meal_keys = {
-        2: ["déjeuner", "dîner"],
-        3: ["petit-déjeuner", "déjeuner", "dîner"],
-        4: ["petit-déjeuner", "déjeuner", "collation", "dîner"],
-    }.get(meals_per_day, ["petit-déjeuner", "déjeuner", "dîner"])
 
     meals = [
         {
-            "name":         meal_names[k][0],
-            "meal_type":    k,
-            "calories":     meal_names[k][1],
-            "proteins_g":   round(meal_names[k][1] * 0.25 / 4, 1),
-            "carbs_g":      round(meal_names[k][1] * 0.45 / 4, 1),
-            "fats_g":       round(meal_names[k][1] * 0.30 / 9, 1),
-            "ingredients":  ["Ingrédients frais de saison"],
-            "instructions": "Préparez avec soin et savourez chaque bouchée.",
-            "motivation":   "Vous faites un excellent choix pour votre santé !"
+            "name": "Repas équilibré",
+            "meal_type": "standard",
+            "calories": per_meal,
+            "proteins_g": round(per_meal * 0.25 / 4, 1),
+            "carbs_g": round(per_meal * 0.45 / 4, 1),
+            "fats_g": round(per_meal * 0.30 / 9, 1),
+            "ingredients": ["légumes", "protéine", "féculent"],
+            "instructions": "Préparer simplement et équilibré",
+            "motivation": "Continue tes efforts 💪"
         }
-        for k in meal_keys
+        for _ in range(meals_per_day)
     ]
 
     return {
-        "plan": [{"day": d + 1, "total_calories": calories, "meals": meals} for d in range(days)],
-        "weekly_tips": [
-            "Préparez vos repas à l'avance pour rester sur la bonne voie.",
-            "Mangez lentement et savourez chaque repas.",
-            "Écoutez votre corps — il sait ce dont il a besoin."
+        "plan": [
+            {
+                "day": i + 1,
+                "total_calories": calories,
+                "meals": meals
+            }
+            for i in range(days)
         ],
-        "hydration_advice": "Buvez au moins 1,5 à 2L d'eau par jour, surtout avant les repas.",
-        "model_used": f"Fallback structuré (OpenAI {MODEL} indisponible)"
+        "weekly_tips": [
+            "Hydrate-toi bien",
+            "Mange équilibré",
+            "Reste constant"
+        ],
+        "hydration_advice": "1.5L à 2L d'eau par jour",
+        "model_used": "fallback_structured"
     }

@@ -73,10 +73,14 @@ def root():
         },
         "endpoints": {
             "calories":        "POST /api/v1/calories/estimate",
+            "calories_info":   "GET /api/v1/calories/model-info",
+            "calories_eval":   "GET /api/v1/calories/eval-report",
+            "calories_tests":  "GET /api/v1/calories/tests",
+            "calories_retrain":"POST /api/v1/calories/retrain",
+
             "preferences":     "POST /api/v1/preferences/analyze",
             "recommendations": "POST /api/v1/recommendations/generate",
             "full_pipeline":   "POST /api/v1/recommendations/full",
-            "model_info":      "GET /api/v1/calories/model-info",
             "docs":            "/docs"
         }
     }

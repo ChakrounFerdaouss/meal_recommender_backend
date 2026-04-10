@@ -1,41 +1,29 @@
 from fastapi import APIRouter, HTTPException
 
 from models.schemas import UserPhysicalData, CalorieEstimation
-from services.calorie_dl import service as calorie_service
+from services.calorie_dl.service import service as calorie_service
 
 router = APIRouter()
 
 
 # ─────────────────────────────────────────────
-#  POST /calories/estimate (Deep Learning)
+# POST /calories/estimate
 # ─────────────────────────────────────────────
 @router.post("/calories/estimate", response_model=CalorieEstimation)
 def estimate_user_calories(data: UserPhysicalData):
     """
     Couche 1 — IA Deep Learning
 
-    Estime les besoins caloriques journaliers à partir d'un réseau de neurones
-    entraîné sur dataset Hugging Face.
+    Estime les besoins caloriques journaliers à partir du pipeline ML.
     """
     try:
-        calories = calorie_service.predict(
+        result = calorie_service.estimate(
             age=data.age,
-            gender=1 if data.gender.value == "male" else 0,
+            gender=data.gender.value,
             weight=data.weight,
             height=data.height,
-            activity=_activity_to_float(data.activity.value)
+            activity=data.activity.value,
         )
-
-        bmi = data.weight / ((data.height / 100) ** 2)
-
-        result = {
-            "bmr": round(calories * 0.75, 1),
-            "tdee": round(calories, 1),
-            "bmi": round(bmi, 2),
-            "bmi_category": _bmi_category(bmi),
-            "model_used": "Deep Learning (CalorieNet)",
-            "dataset_source": "khalidalt/DietNation"
-        }
 
         return CalorieEstimation(**result)
 
@@ -44,47 +32,56 @@ def estimate_user_calories(data: UserPhysicalData):
 
 
 # ─────────────────────────────────────────────
-#  GET /calories/model-info
+# GET /calories/model-info
 # ─────────────────────────────────────────────
 @router.get("/calories/model-info")
 def calorie_model_info():
     """
-    Informations sur le modèle Deep Learning utilisé
+    Informations sur le modèle Deep Learning utilisé.
     """
-    return {
-        "model": "CalorieNet (PyTorch Neural Network)",
-        "architecture": "6 features → 128 → 64 → 1",
-        "dataset": "khalidalt/DietNation",
-        "type": "Deep Learning Regression"
-    }
+    try:
+        return calorie_service.get_model_info()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ─────────────────────────────────────────────
-#  Helpers
+# GET /calories/eval-report
 # ─────────────────────────────────────────────
-def _activity_to_float(activity: str) -> float:
-    mapping = {
-        "sedentary": 1.2,
-        "light": 1.375,
-        "moderate": 1.55,
-        "active": 1.725,
-        "very_active": 1.9,
-    }
-    return mapping.get(activity, 1.55)
+@router.get("/calories/eval-report")
+def calorie_eval_report():
+    """
+    Retourne les métriques de performance du modèle.
+    """
+    try:
+        return calorie_service.get_eval_report()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-def _bmi_category(bmi: float) -> str:
-    if bmi < 18.5:
-        return "Insuffisance pondérale"
-    elif bmi < 25:
-        return "Poids normal"
-    elif bmi < 30:
-        return "Surpoids"
-    elif bmi < 35:
-        return "Obésité modérée"
-    else:
-        return "Obésité sévère"
-    
-@router.get("/calories/debug")
-def debug():
-    return calorie_service.evaluate_model()
+# ─────────────────────────────────────────────
+# GET /calories/tests
+# ─────────────────────────────────────────────
+@router.get("/calories/tests")
+def run_calorie_tests():
+    """
+    Lance les tests sur profils de référence.
+    """
+    try:
+        return calorie_service.run_tests()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────────────────────────
+# POST /calories/retrain
+# ─────────────────────────────────────────────
+@router.post("/calories/retrain")
+def retrain_model():
+    """
+    Relance l'entraînement complet du modèle.
+    """
+    try:
+        return calorie_service.retrain()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

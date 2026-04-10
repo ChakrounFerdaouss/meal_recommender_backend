@@ -3,7 +3,7 @@ Schémas Pydantic — validation et documentation automatique des données
 """
 
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Dict
 from enum import Enum
 
 
@@ -32,13 +32,32 @@ class UserPhysicalData(BaseModel):
     activity: ActivityLevel
 
 
+# ─────────────────────────────────────────
+# MACROS + OBJECTIFS
+# ─────────────────────────────────────────
+
+class MacroNutrients(BaseModel):
+    proteines_g: float
+    lipides_g: float
+    glucides_g: float
+
+
+class CalorieGoals(BaseModel):
+    perte_douce: int
+    perte_rapide: int
+    maintien: int
+    prise_douce: int
+    prise_rapide: int
+
+
 class CalorieEstimation(BaseModel):
-    bmr: float
-    tdee: float
+    tdee_kcal: float
+    bmr_kcal: float
     bmi: float
-    bmi_category: str
-    model_used: str
-    dataset_source: str
+    bmi_categorie: str
+    activity_factor: float
+    objectifs_caloriques: CalorieGoals
+    macros_maintien: MacroNutrients
 
 
 # ─────────────────────────────────────────
@@ -49,18 +68,25 @@ class PreferenceInput(BaseModel):
     text: str = Field(..., min_length=5)
 
 
+class ConfidenceScores(BaseModel):
+    diet: Dict[str, float]
+    goal: Dict[str, float]
+    cuisine: Dict[str, float]
+    restriction: Dict[str, float]
+
+
 class ExtractedPreferences(BaseModel):
     diet_type: str
     goal: str
     cuisine_style: List[str]
     restrictions: List[str]
     preferred_proteins: List[str]
-    confidence_scores: dict
+    confidence_scores: ConfidenceScores
     model_used: str
 
 
 # ─────────────────────────────────────────
-# COUCHE 3 — IA Générative
+# COUCHE 3 — IA GÉNÉRATIVE
 # ─────────────────────────────────────────
 
 class Mood(str, Enum):

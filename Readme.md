@@ -14,7 +14,7 @@ meal-recommender/
 ├── services/
 │   ├── calorie_dl                 ← COUCHE 1 : IA Classique (Deeplearning)
 │   ├── preference_service.py        ← COUCHE 2 : IA NLP (zero-shot BART)
-│   └── recommendation_service.py   ← COUCHE 3 : IA Générative (Claude API)
+│   └── recommendation_service.py   ← COUCHE 3 : IA Générative (OpenAI API)
 ├── routes/
 │   ├── calorie_routes.py
 │   ├── preference_routes.py
@@ -25,10 +25,9 @@ meal-recommender/
 
 | # | Type | Technologie | Rôle |
 |---|------|------------|------|
-| 1 | IA Classique | DL + Dataset HuggingFace `khalidalt/DietNation` | Estimer BMR, TDEE, IMC |
-| 2 | IA NLP | `facebook/bart-large-mnli` (zero-shot) | Extraire régime, objectif, restrictions du texte |
-| 3 | IA Générative | Anthropic Claude `claude-sonnet-4-20250514` | Générer le plan de repas motivant |
-
+| 1 | Deep Learning | PyTorch + dataset `khalidalt/DietNation` | Estimer BMR, TDEE, IMC |
+| 2 | NLP | `facebook/bart-large-mnli` (zero-shot) | Extraire régime, objectifs et restrictions |
+| 3 | Générative | OpenAI `gpt-4o-mini` (fallback possible) | Générer des plans de repas
 ---
 
 ## Installation
@@ -76,8 +75,8 @@ curl -X POST http://localhost:8000/api/v1/calories/estimate \
   -d '{
     "age": 30,
     "gender": "male",
-    "weight": 75.0,
-    "height": 178.0,
+    "weight": 75,
+    "height": 178,
     "activity": "moderate"
   }'
 ```
@@ -87,7 +86,7 @@ curl -X POST http://localhost:8000/api/v1/calories/estimate \
 curl -X POST http://localhost:8000/api/v1/preferences/analyze \
   -H "Content-Type: application/json" \
   -d '{
-    "text": "Je suis végétarienne, j adore la cuisine méditerranéenne et asiatique. Mon objectif est de perdre 5kg tout en gardant mon énergie."
+    "text": "Je suis végétarienne, j aime la cuisine méditerranéenne et asiatique. Mon objectif est de perdre du poids."
   }'
 ```
 
@@ -99,11 +98,13 @@ curl -X POST http://localhost:8000/api/v1/recommendations/full \
     "physical_data": {
       "age": 28,
       "gender": "female",
-      "weight": 62.0,
-      "height": 166.0,
+      "weight": 62,
+      "height": 166,
       "activity": "moderate"
     },
-    "preference_text": "Je suis végétarienne, j adore la cuisine méditerranéenne et asiatique. Mon objectif est de perdre 5kg.",
+    "preference_text": "Je suis végétarienne, j aime la cuisine méditerranéenne et asiatique. Mon objectif est de perdre du poids.",
+    "mood": "motivé",
+    "energy_level": "moyen",
     "meals_per_day": 3,
     "days": 1
   }'
@@ -113,21 +114,22 @@ curl -X POST http://localhost:8000/api/v1/recommendations/full \
 
 ## Endpoints disponibles
 
-| Méthode | Endpoint | Description |
-|---------|----------|-------------|
-| GET | `/` | Health check + liste des endpoints |
-| GET | `/docs` | Documentation Swagger interactive |
-| POST | `/api/v1/calories/estimate` | Couche 1 : estimation calorique |
-| GET | `/api/v1/calories/model-info` | Infos modèle ML et dataset |
-| POST | `/api/v1/preferences/analyze` | Couche 2 : analyse NLP du texte |
-| POST | `/api/v1/recommendations/generate` | Couche 3 : génération Claude |
-| **POST** | **`/api/v1/recommendations/full`** | **Pipeline complet (1+2+3)** |
+Méthode	Endpoint	Description
+GET	/	Health check
+GET	/docs	Swagger UI
+POST	/api/v1/calories/estimate	Estimation BMR/TDEE
+GET	/api/v1/calories/model-info	Infos modèle DL
+GET	/api/v1/calories/debug	Metrics du modèle
+POST	/api/v1/preferences/analyze	Analyse NLP
+POST	/api/v1/recommendations/generate	Génération IA
+POST	/api/v1/recommendations/full	Pipeline complet
 
 ---
 
 ## Notes importantes
 
-- **Première exécution** : le dataset HuggingFace (~2 Mo) et le modèle BART (~1.6 Go) sont téléchargés automatiquement
-- **Sans GPU** : remplacer `torch` par `torch-cpu` dans requirements.txt pour réduire la taille
-- **Fallback NLP** : si `transformers` n'est pas disponible, l'extraction se fait par règles regex
-- **Fallback dataset** : si HuggingFace est inaccessible, des données synthétiques sont utilisées
+🧠 Modèle DL basé sur PyTorch (CalorieNet)
+🤖 NLP avec facebook/bart-large-mnli
+⚡ Génération avec OpenAI (gpt-4o-mini)
+🔁 Fallback automatique si API indisponible
+📦 Swagger disponible sur /docs

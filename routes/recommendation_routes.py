@@ -17,18 +17,18 @@ from services.recommendation_service import (
     generate_meal_plan
 )
 
-# 🔥 Deep Learning service
-from services.calorie_dl import service as calorie_service
-
+from services.calorie_dl.service import service as calorie_service
 
 router = APIRouter()
 
 
 # ─────────────────────────────────────────────
-# POST /recommendations/generate
+# /recommendations/generate
 # ─────────────────────────────────────────────
+
 @router.post("/recommendations/generate", response_model=MealRecommendation)
 def generate_meal_recommendations(data: RecommendationRequest):
+
     try:
         result = generate_recommendations(
             calorie_data=data.calorie_data.model_dump(),
@@ -38,25 +38,26 @@ def generate_meal_recommendations(data: RecommendationRequest):
             meals_per_day=data.meals_per_day,
             days=data.days
         )
+
         return MealRecommendation(**result)
 
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 # ─────────────────────────────────────────────
-# POST /recommendations/text
+# /recommendations/text
 # ─────────────────────────────────────────────
+
 @router.post("/recommendations/text")
 def generate_text_plan(
     calories: float,
     preferences: str,
     objectif: str,
-    mood: Mood = Mood.motivé,   
+    mood: Mood = Mood.motivé,
     energy_level: EnergyLevel = EnergyLevel.moyen
 ):
+
     try:
         text = generate_meal_plan(
             calories=calories,
@@ -65,55 +66,56 @@ def generate_text_plan(
             mood=mood.value,
             energy_level=energy_level.value
         )
-        return {"plan_text": text, "model": "gpt-4o-mini"}
+
+        return {
+            "plan_text": text,
+            "model": "gpt-4o-mini"
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 # ─────────────────────────────────────────────
-# POST /recommendations/full
+# /recommendations/full (PIPELINE 3 COUCHES)
 # ─────────────────────────────────────────────
+
 @router.post("/recommendations/full", response_model=FullPipelineResponse)
 def full_pipeline(data: FullPipelineRequest):
+
     try:
-        # ── Couche 1 : DEEP LEARNING ──
-        calories_pred = calorie_service.predict(
+        # ─────────────────────────────
+        # COUCHE 1 — DL CALORIES
+        # ─────────────────────────────
+        calorie_result_dict = calorie_service.estimate(
             age=data.physical_data.age,
-            gender=1 if data.physical_data.gender.value == "male" else 0,
+            gender=data.physical_data.gender.value,
             weight=data.physical_data.weight,
             height=data.physical_data.height,
-            activity=_activity_to_float(data.physical_data.activity.value)
+            activity=data.physical_data.activity.value
         )
 
-        bmi = data.physical_data.weight / ((data.physical_data.height / 100) ** 2)
+        calorie_result = CalorieEstimation(**calorie_result_dict)
 
-        calorie_raw = {
-            "bmr": round(calories_pred * 0.75, 1),
-            "tdee": round(calories_pred, 1),
-            "bmi": round(bmi, 2),
-            "bmi_category": "computed",
-            "model_used": "CalorieNet (Deep Learning)",
-            "dataset_source": "khalidalt/DietNation"
-        }
+        # ─────────────────────────────
+        # COUCHE 2 — NLP
+        # ─────────────────────────────
+        pref_dict = analyze_preferences(data.preference_text)
+        pref_result = ExtractedPreferences(**pref_dict)
 
-        calorie_result = CalorieEstimation(**calorie_raw)
-
-        # ── Couche 2 : NLP ──
-        pref_raw = analyze_preferences(data.preference_text)
-        pref_result = ExtractedPreferences(**pref_raw)
-
-        # ── Couche 3 : GEN AI ──
-        reco_raw = generate_recommendations(
-            calorie_data=calorie_raw,
-            preferences=pref_raw,
+        # ─────────────────────────────
+        # COUCHE 3 — GEN AI
+        # ─────────────────────────────
+        reco_dict = generate_recommendations(
+            calorie_data=calorie_result_dict,
+            preferences=pref_dict,
             mood=data.mood.value,
             energy_level=data.energy_level.value,
             meals_per_day=data.meals_per_day,
             days=data.days
         )
 
-        reco_result = MealRecommendation(**reco_raw)
+        reco_result = MealRecommendation(**reco_dict)
 
         return FullPipelineResponse(
             step1_calories=calorie_result,
@@ -123,19 +125,6 @@ def full_pipeline(data: FullPipelineRequest):
 
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# ─────────────────────────────────────────────
-# HELPERS
-# ─────────────────────────────────────────────
-def _activity_to_float(activity: str) -> float:
-    mapping = {
-        "sedentary": 1.2,
-        "light": 1.375,
-        "moderate": 1.55,
-        "active": 1.725,
-        "very_active": 1.9,
-    }
-    return mapping.get(activity, 1.55)
